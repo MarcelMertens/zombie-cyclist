@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "vite preview"
+    "start": "npx serve dist -l ${PORT:-4173}"
   },
   "engines": {
     "node": ">=20.19.0"
