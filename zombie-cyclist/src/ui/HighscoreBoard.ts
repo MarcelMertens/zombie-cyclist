@@ -75,7 +75,7 @@ export class HighscoreBoardUI {
     // Table header
     const rowY0 = 165;
     const rowH = 36;
-    const COL = { rank: 40, name: 80, time: 300, avg: 410, max: 510, diff: 620, date: 830 };
+    const COL = { rank: 30, name: 68, time: 240, avg: 345, max: 448, best60s: 555, diff: 668, date: 870 };
     ctx.fillStyle = '#555';
     ctx.font = '13px monospace';
     ctx.textAlign = 'left';
@@ -84,6 +84,7 @@ export class HighscoreBoardUI {
     ctx.fillText('Time', COL.time, rowY0);
     ctx.fillText('Avg W', COL.avg, rowY0);
     ctx.fillText('Max W', COL.max, rowY0);
+    ctx.fillText('Best 60s W', COL.best60s, rowY0);
     ctx.fillText('Difficulty', COL.diff, rowY0);
     ctx.fillText('Date', COL.date, rowY0);
 
@@ -99,7 +100,7 @@ export class HighscoreBoardUI {
 
       if (isNew) {
         ctx.fillStyle = 'rgba(255, 214, 0, 0.15)';
-        ctx.fillRect(30, ry - 24, CANVAS_WIDTH - 60, rowH);
+        ctx.fillRect(20, ry - 24, CANVAS_WIDTH - 40, rowH);
       }
 
       ctx.fillStyle = isNew ? '#ffd600' : '#ddd';
@@ -112,6 +113,10 @@ export class HighscoreBoardUI {
       ctx.fillText(`${mins}:${String(secs).padStart(2,'0')}`, COL.time, ry);
       ctx.fillText(`${Math.round(e.avgWatt)} W`, COL.avg, ry);
       ctx.fillText(`${Math.round(e.maxWatt)} W`, COL.max, ry);
+      const b60 = (e as { best60sWatt?: number }).best60sWatt;
+      ctx.fillStyle = isNew ? '#ffd600' : '#00e5ff';
+      ctx.fillText(b60 ? `${Math.round(b60)} W` : '—', COL.best60s, ry);
+      ctx.fillStyle = isNew ? '#ffd600' : '#ddd';
       ctx.fillText(`${PRESETS[e.difficulty].emoji} ${PRESETS[e.difficulty].label}`, COL.diff, ry);
       const d = new Date(e.timestamp);
       ctx.fillText(d.toLocaleDateString(), COL.date, ry);

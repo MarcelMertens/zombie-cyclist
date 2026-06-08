@@ -51,6 +51,7 @@ export class GameOverScreen {
     survivalSeconds: number,
     maxWatt: number,
     avgWatt: number,
+    best60sWatt: number,
     difficulty: DifficultyConfig,
     isDemo: boolean,
   ): void {
@@ -72,17 +73,20 @@ export class GameOverScreen {
     const secs = Math.floor(survivalSeconds % 60);
     ctx.fillStyle = '#fff';
     ctx.font = '22px monospace';
-    ctx.fillText(`Survived: ${mins}:${String(secs).padStart(2, '0')}`, cx, 230);
-    ctx.fillText(`Avg Power: ${Math.round(avgWatt)} W   Max: ${Math.round(maxWatt)} W`, cx, 265);
-    ctx.fillText(`Difficulty: ${difficulty.emoji} ${difficulty.label}`, cx, 300);
+    ctx.fillText(`Survived: ${mins}:${String(secs).padStart(2, '0')}`, cx, 228);
+    ctx.fillText(`Avg Power: ${Math.round(avgWatt)} W   Max: ${Math.round(maxWatt)} W`, cx, 260);
+    ctx.fillStyle = '#00e5ff';
+    ctx.fillText(`Best 60s avg: ${best60sWatt > 0 ? Math.round(best60sWatt) + ' W' : '—'}`, cx, 292);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`Difficulty: ${difficulty.emoji} ${difficulty.label}`, cx, 324);
 
     if (isDemo) {
       ctx.fillStyle = '#ff9800';
       ctx.font = 'bold 20px monospace';
-      ctx.fillText('DEMO — score not saved', cx, 340);
+      ctx.fillText('DEMO — score not saved', cx, 364);
       ctx.fillStyle = '#aaa';
       ctx.font = '18px monospace';
-      ctx.fillText('Restarting in a moment...', cx, 380);
+      ctx.fillText('Restarting in a moment...', cx, 404);
       ctx.restore();
       return;
     }
@@ -90,12 +94,12 @@ export class GameOverScreen {
     if (!this.submitted) {
       ctx.fillStyle = '#ffd600';
       ctx.font = 'bold 24px monospace';
-      ctx.fillText('Gib deinen Namen ein:', cx, 360);
+      ctx.fillText('Gib deinen Namen ein:', cx, 382);
 
       const fieldW = 440;
       const fieldH = 56;
       const fx = cx - fieldW / 2;
-      const fy = 378;
+      const fy = 400;
 
       ctx.fillStyle = 'rgba(255,214,0,0.08)';
       ctx.strokeStyle = '#ffd600';

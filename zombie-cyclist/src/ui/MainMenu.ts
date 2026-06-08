@@ -100,7 +100,7 @@ export class MainMenu {
     ctx.fillStyle = '#666';
     ctx.font = '13px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Arrow keys: adjust watts   |   Space: jump   |   Enter: play', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 24);
+    ctx.fillText('Arrow keys: adjust watts   |   Enter: play', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 24);
 
     ctx.restore();
   }

@@ -6,6 +6,7 @@ export interface HighscoreEntry {
   survivalSeconds: number;
   maxWatt: number;
   avgWatt: number;
+  best60sWatt: number;
   difficulty: Difficulty;
   mode: 'trainer' | 'demo' | 'keyboard';
   timestamp: number;

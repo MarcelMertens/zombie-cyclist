@@ -1,7 +1,7 @@
 import { GameState } from './GameState';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, SPEED_CONFIG, PLAYER_X } from './config';
 import { HighscoreBoard } from './scoring';
-import { loadConfig, resolveConfig, ConfigScreen } from '../ui/ConfigScreen';
+import { loadConfig, saveConfig, resolveConfig, ConfigScreen } from '../ui/ConfigScreen';
 import { TrainerManager, type TrainerMode } from '../trainer/TrainerManager';
 import { Player } from '../entities/Player';
 import { Zombie } from '../entities/Zombie';
@@ -13,6 +13,7 @@ import { HUD } from '../ui/HUD';
 import { MainMenu, type MenuAction } from '../ui/MainMenu';
 import { HighscoreBoardUI } from '../ui/HighscoreBoard';
 import { GameOverScreen } from '../ui/GameOver';
+import { DifficultySelectScreen, type DifficultyAction } from '../ui/DifficultySelectScreen';
 
 const COUNTDOWN_SECONDS = 10;
 const DEATH_ANIM_MS = 4500;
@@ -27,6 +28,7 @@ export class Game {
 
   private mainMenu = new MainMenu();
   private configScreen = new ConfigScreen();
+  private difficultyScreen = new DifficultySelectScreen();
   private highscoreUI: HighscoreBoardUI;
   private gameOverScreen = new GameOverScreen();
   private hud = new HUD();
@@ -41,6 +43,10 @@ export class Game {
 
   private wattHistory: number[] = [];
   private maxWatt = 0;
+  private secBuckets: number[] = [];
+  private secBucketWatt = 0;
+  private secBucketN = 0;
+  private lastElapsedFloor = -1;
   private demoRestartTimer = 0;
   private countdownSec = COUNTDOWN_SECONDS;
 
@@ -57,7 +63,7 @@ export class Game {
   private static readonly DANGER_DIST_START = 220;
   private static readonly DANGER_DIST_FULL = 60;
 
-  private jumping = false;
+  private pendingMode: TrainerMode | 'bluetooth' = 'keyboard';
   private prevHighscoresState: GameState = GameState.MENU;
   private prevGameState: GameState = GameState.PLAYING;
 
@@ -96,7 +102,6 @@ export class Game {
 
   private bindInput(): void {
     window.addEventListener('keydown', e => this.onKeyDown(e));
-    window.addEventListener('keyup', e => this.onKeyUp(e));
     this.canvas.addEventListener('click', e => this.onClick(e));
     this.canvas.addEventListener('mousedown', e => this.onMouseDown(e));
     this.canvas.addEventListener('mousemove', e => this.onMouseMove(e));
@@ -116,6 +121,9 @@ export class Game {
     if (this.state === GameState.MENU) {
       const action = this.mainMenu.handleClick(mx, my);
       if (action) this.handleMenuAction(action);
+    } else if (this.state === GameState.DIFFICULTY_SELECT) {
+      const action = this.difficultyScreen.handleClick(mx, my);
+      if (action) this.handleDifficultyAction(action);
     } else if (this.state === GameState.CONFIG) {
       const action = this.configScreen.handleClick(mx, my);
       if (action === 'back' || action === 'save') this.setState(GameState.MENU);
@@ -143,21 +151,22 @@ export class Game {
       this.setState(GameState.MENU);
     }
     if (this.state === GameState.PLAYING || this.state === GameState.DEMO) {
-      if (e.code === 'Space') { e.preventDefault(); this.jumping = true; }
       if (e.key === 'Escape') this.setState(GameState.MENU);
+    }
+    if (this.state === GameState.DIFFICULTY_SELECT && e.key === 'Escape') {
+      this.setState(GameState.MENU);
     }
     if (this.state === GameState.GAMEOVER && this.deathAnimMs === 0) {
       const action = this.gameOverScreen.handleKey(e.key);
-      if (action === 'retry') this.startGame(this.trainer?.getMode() ?? 'keyboard');
+      if (action === 'retry') {
+        this.pendingMode = this.trainer?.getMode() ?? 'keyboard';
+        this.setState(GameState.DIFFICULTY_SELECT);
+      }
       if (action === 'menu') this.setState(GameState.MENU);
       if (action === 'submit') this.submitScore();
     }
     if (this.state === GameState.MENU && e.key === 'Enter') this.handleMenuAction('play');
-    if (this.state === GameState.DEMO && e.key === 'Enter') this.startGame('keyboard');
-  }
-
-  private onKeyUp(e: KeyboardEvent): void {
-    if (e.code === 'Space') this.jumping = false;
+    if (this.state === GameState.DEMO && e.key === 'Enter') this.setState(GameState.DIFFICULTY_SELECT);
   }
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -171,14 +180,38 @@ export class Game {
   }
 
   private handleMenuAction(action: MenuAction): void {
-    if (action === 'play') this.startGame('keyboard');
-    else if (action === 'demo') this.startGame('demo');
-    else if (action === 'config') this.setState(GameState.CONFIG);
-    else if (action === 'highscores') {
+    if (action === 'play') {
+      this.pendingMode = 'keyboard';
+      this.setState(GameState.DIFFICULTY_SELECT);
+    } else if (action === 'demo') {
+      this.pendingMode = 'demo';
+      this.setState(GameState.DIFFICULTY_SELECT);
+    } else if (action === 'bluetooth') {
+      this.pendingMode = 'bluetooth';
+      this.setState(GameState.DIFFICULTY_SELECT);
+    } else if (action === 'config') {
+      this.setState(GameState.CONFIG);
+    } else if (action === 'highscores') {
       this.prevHighscoresState = GameState.MENU;
       this.highscoreUI.setNewEntry(null, null);
       this.setState(GameState.HIGHSCORES);
-    } else if (action === 'bluetooth') this.connectBluetooth();
+    }
+  }
+
+  private handleDifficultyAction(action: DifficultyAction): void {
+    if (action === 'back') {
+      this.setState(GameState.MENU);
+      return;
+    }
+    const cfg = loadConfig();
+    cfg.difficulty = action;
+    saveConfig(cfg);
+
+    if (this.pendingMode === 'bluetooth') {
+      this.connectBluetooth();
+    } else {
+      this.startGame(this.pendingMode as TrainerMode);
+    }
   }
 
   private connectError = '';
@@ -224,6 +257,10 @@ export class Game {
     this.zombies = [];
     this.wattHistory = [];
     this.maxWatt = 0;
+    this.secBuckets = [];
+    this.secBucketWatt = 0;
+    this.secBucketN = 0;
+    this.lastElapsedFloor = -1;
     this.demoRestartTimer = 0;
     this.deathAnimMs = 0;
     this.countdownSec = COUNTDOWN_SECONDS;
@@ -255,8 +292,7 @@ export class Game {
     if (data.watt > this.maxWatt) this.maxWatt = data.watt;
 
     this.bg.update(worldSpeed, dt);
-    player.update(dt, this.jumping);
-    this.jumping = false;
+    player.update(dt);
 
     // Countdown: animate freely, no zombies yet
     if (this.countdownSec > 0) {
@@ -266,6 +302,19 @@ export class Game {
     }
 
     escalation.update(dt);
+
+    // Per-second bucketing for best-60s avg calculation
+    const elapsedFloor = Math.floor(escalation.elapsed);
+    if (elapsedFloor !== this.lastElapsedFloor) {
+      if (this.lastElapsedFloor >= 0 && this.secBucketN > 0) {
+        this.secBuckets.push(this.secBucketWatt / this.secBucketN);
+      }
+      this.lastElapsedFloor = elapsedFloor;
+      this.secBucketWatt = 0;
+      this.secBucketN = 0;
+    }
+    this.secBucketWatt += data.watt;
+    this.secBucketN++;
 
     const newZombies = spawner.update(dt, escalation.elapsed, escalation.getSpawnCount(), this.zombies);
     this.zombies.push(...newZombies);
@@ -340,11 +389,31 @@ export class Game {
 
   private triggerGameOver(cause: DeathCause): void {
     this.deathCause = cause;
+    // Flush any partial second bucket before score is computed
+    if (this.secBucketN > 0) {
+      this.secBuckets.push(this.secBucketWatt / this.secBucketN);
+      this.secBucketWatt = 0;
+      this.secBucketN = 0;
+    }
     // Demo mode: short animation, then auto-restart
     this.deathAnimMs = this.trainer?.getMode() === 'demo' ? 2000 : DEATH_ANIM_MS;
     this.setState(GameState.GAMEOVER);
     this.gameOverScreen.reset();
     this.demoRestartTimer = 0;
+  }
+
+  private computeBest60s(): number {
+    const b = this.secBuckets;
+    if (b.length === 0) return 0;
+    const W = 60;
+    let best = 0;
+    let sum = 0;
+    for (let i = 0; i < b.length; i++) {
+      sum += b[i];
+      if (i >= W) sum -= b[i - W];
+      best = Math.max(best, sum / Math.min(i + 1, W));
+    }
+    return best;
   }
 
   private submitScore(): void {
@@ -361,6 +430,7 @@ export class Game {
       survivalSeconds: escalation.elapsed,
       maxWatt,
       avgWatt,
+      best60sWatt: this.computeBest60s(),
       difficulty: loadConfig().difficulty,
       mode,
       timestamp: Date.now(),
@@ -380,6 +450,7 @@ export class Game {
       if (this.connectError) this.drawConnectError(this.connectError);
       return;
     }
+    if (this.state === GameState.DIFFICULTY_SELECT) { this.difficultyScreen.draw(ctx); return; }
     if (this.state === GameState.CONFIG) { this.configScreen.draw(ctx); return; }
     if (this.state === GameState.HIGHSCORES) { this.highscoreUI.draw(ctx); return; }
     if (this.state === GameState.CONNECTING) { this.drawConnecting(); return; }
@@ -405,7 +476,7 @@ export class Game {
         ? wattHistory.reduce((a, b) => a + b, 0) / wattHistory.length
         : 0;
       const isDemo = this.trainer?.getMode() === 'demo';
-      this.gameOverScreen.draw(ctx, escalation.elapsed, maxWatt, avgWatt, resolveConfig(loadConfig()), isDemo);
+      this.gameOverScreen.draw(ctx, escalation.elapsed, maxWatt, avgWatt, this.computeBest60s(), resolveConfig(loadConfig()), isDemo);
 
       if (isDemo) {
         this.demoRestartTimer += 16;

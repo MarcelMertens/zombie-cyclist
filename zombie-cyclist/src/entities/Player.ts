@@ -1,7 +1,5 @@
 import { GROUND_Y, PLAYER_X } from '../game/config';
 
-const JUMP_VELOCITY = -14;
-const GRAVITY = 0.6;
 const FRAME_COUNT = 13;
 const FRAME_W = 200; // source frame width in the spriteset
 const FRAME_H = 200; // source frame height
@@ -24,8 +22,6 @@ function initSprite(): void {
 export class Player {
   x = PLAYER_X;
   y = GROUND_Y;
-  vy = 0;
-  isGrounded = true;
   tick = 0;
   readonly W = DISPLAY_W;
   readonly H = DISPLAY_H;
@@ -34,18 +30,7 @@ export class Player {
     initSprite();
   }
 
-  update(_dt: number, jumping: boolean): void {
-    if (jumping && this.isGrounded) {
-      this.vy = JUMP_VELOCITY;
-      this.isGrounded = false;
-    }
-    this.vy += GRAVITY;
-    this.y += this.vy;
-    if (this.y >= GROUND_Y) {
-      this.y = GROUND_Y;
-      this.vy = 0;
-      this.isGrounded = true;
-    }
+  update(_dt: number): void {
     this.tick++;
   }
 
