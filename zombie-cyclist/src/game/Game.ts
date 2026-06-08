@@ -59,6 +59,7 @@ export class Game {
 
   private jumping = false;
   private prevHighscoresState: GameState = GameState.MENU;
+  private prevGameState: GameState = GameState.PLAYING;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -118,6 +119,7 @@ export class Game {
     } else if (this.state === GameState.CONFIG) {
       const action = this.configScreen.handleClick(mx, my);
       if (action === 'back' || action === 'save') this.setState(GameState.MENU);
+      else if (action === 'delete_scores') this.hsBoard.clear();
     } else if (this.state === GameState.HIGHSCORES) {
       const action = this.highscoreUI.handleClick(mx, my);
       if (action === 'close') this.setState(this.prevHighscoresState);
@@ -137,6 +139,9 @@ export class Game {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    if (this.state === GameState.RECONNECTING && e.key === 'Escape') {
+      this.setState(GameState.MENU);
+    }
     if (this.state === GameState.PLAYING || this.state === GameState.DEMO) {
       if (e.code === 'Space') { e.preventDefault(); this.jumping = true; }
       if (e.key === 'Escape') this.setState(GameState.MENU);
@@ -183,8 +188,20 @@ export class Game {
     this.setState(GameState.CONNECTING);
     try {
       const tm = new TrainerManager('bluetooth');
-      await tm.getBluetooth()!.connect(() => {
-        if (this.state === GameState.PLAYING) alert('Trainer disconnected! Reconnect and press OK.');
+      await tm.getBluetooth()!.connect((status) => {
+        if (status === 'disconnected' || status === 'reconnecting') {
+          if (this.state === GameState.PLAYING || this.state === GameState.DEMO) {
+            this.prevGameState = this.state;
+            this.setState(GameState.RECONNECTING);
+          }
+        } else if (status === 'reconnected') {
+          if (this.state === GameState.RECONNECTING) {
+            this.setState(this.prevGameState);
+          }
+        } else if (status === 'reconnect_failed') {
+          this.connectError = 'Trainer getrennt — Verbindung konnte nicht wiederhergestellt werden.';
+          this.setState(GameState.MENU);
+        }
       });
       this.startGameWithTrainer(tm);
     } catch (err) {
@@ -366,6 +383,7 @@ export class Game {
     if (this.state === GameState.CONFIG) { this.configScreen.draw(ctx); return; }
     if (this.state === GameState.HIGHSCORES) { this.highscoreUI.draw(ctx); return; }
     if (this.state === GameState.CONNECTING) { this.drawConnecting(); return; }
+    if (this.state === GameState.RECONNECTING) { this.drawReconnecting(); return; }
 
     if (this.state === GameState.PLAYING || this.state === GameState.DEMO) {
       this.drawGame();
@@ -557,6 +575,34 @@ export class Game {
     ctx.fillStyle = '#fff';
     ctx.fillText(`${Math.round(currentWatt)} W`, x + w / 2, y + 25);
     ctx.restore();
+  }
+
+  private drawReconnecting(): void {
+    const { ctx } = this;
+    this.drawGame(true);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    const dots = '.'.repeat(Math.floor(Date.now() / 400) % 4);
+    const attempts = this.trainer?.getBluetooth()?.reconnectAttempts ?? 0;
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff9800';
+    ctx.font = 'bold 36px monospace';
+    ctx.shadowColor = '#ff9800';
+    ctx.shadowBlur = 16;
+    ctx.fillText('Verbindung unterbrochen', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 50);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '22px monospace';
+    const attemptLabel = attempts > 0 ? ` (${attempts}/${8})` : '';
+    ctx.fillText(`Verbinde neu${dots}${attemptLabel}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 10);
+
+    ctx.fillStyle = '#555';
+    ctx.font = '15px monospace';
+    ctx.fillText('Spiel wird fortgesetzt nach Reconnect  ·  Esc = Hauptmenü', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 58);
   }
 
   private drawConnecting(): void {

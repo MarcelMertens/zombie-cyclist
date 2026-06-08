@@ -24,7 +24,7 @@ export function resolveConfig(cfg: GameConfig): DifficultyConfig {
   return { ...PRESETS[cfg.difficulty], ...cfg.custom };
 }
 
-type ConfigAction = 'back' | 'save' | null;
+type ConfigAction = 'back' | 'save' | 'delete_scores' | null;
 
 interface Slider {
   key: keyof DifficultyConfig;
@@ -46,6 +46,7 @@ export class ConfigScreen {
   private cfg: GameConfig;
   private expanded = false;
   private dragging: Slider | null = null;
+  private deleteClickMs = 0;
 
   constructor() {
     this.cfg = loadConfig();
@@ -67,6 +68,7 @@ export class ConfigScreen {
       if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
         this.cfg.difficulty = presets[i];
         this.cfg.custom = {};
+        this.deleteClickMs = 0;
         return null;
       }
     }
@@ -74,8 +76,24 @@ export class ConfigScreen {
     // Expand toggle
     if (mx >= cx - 100 && mx <= cx + 100 && my >= 310 && my <= 340) {
       this.expanded = !this.expanded;
+      this.deleteClickMs = 0;
       return null;
     }
+
+    // Delete Highscores button (two-click confirm)
+    const delX = cx - 110, delY = CANVAS_HEIGHT - 70, delW = 220, delH = 40;
+    if (mx >= delX && mx <= delX + delW && my >= delY && my <= delY + delH) {
+      const isPending = this.deleteClickMs > 0 && Date.now() - this.deleteClickMs < 3000;
+      if (isPending) {
+        this.deleteClickMs = 0;
+        return 'delete_scores';
+      }
+      this.deleteClickMs = Date.now();
+      return null;
+    }
+
+    // Any other click resets the delete confirm state
+    this.deleteClickMs = 0;
 
     // Back
     if (mx >= 40 && mx <= 160 && my >= CANVAS_HEIGHT - 70 && my <= CANVAS_HEIGHT - 30) return 'back';
@@ -202,6 +220,7 @@ export class ConfigScreen {
     ctx.textAlign = 'center';
     ctx.font = 'bold 18px monospace';
 
+    // ← Back
     ctx.fillStyle = 'rgba(255,82,82,0.15)';
     ctx.strokeStyle = '#ff5252';
     ctx.lineWidth = 1.5;
@@ -211,8 +230,26 @@ export class ConfigScreen {
     ctx.fillStyle = '#ff5252';
     ctx.fillText('← Back', 100, CANVAS_HEIGHT - 44);
 
+    // 🗑 Delete Highscores (center, two-click confirm)
+    const isPending = this.deleteClickMs > 0 && Date.now() - this.deleteClickMs < 3000;
+    ctx.fillStyle = isPending ? 'rgba(255,152,0,0.25)' : 'rgba(255,82,82,0.08)';
+    ctx.strokeStyle = isPending ? '#ff9800' : '#ff5252';
+    ctx.lineWidth = isPending ? 2 : 1;
+    ctx.beginPath();
+    ctx.roundRect(cx - 110, CANVAS_HEIGHT - 70, 220, 40, 8);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = isPending ? '#ff9800' : '#ff5252';
+    ctx.font = isPending ? 'bold 15px monospace' : '15px monospace';
+    ctx.fillText(
+      isPending ? '⚠ Wirklich? Nochmal klicken' : '🗑 Delete Highscores',
+      cx, CANVAS_HEIGHT - 44,
+    );
+
+    // ✓ Save
+    ctx.font = 'bold 18px monospace';
     ctx.fillStyle = 'rgba(0,229,255,0.15)';
     ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.roundRect(CANVAS_WIDTH - 180, CANVAS_HEIGHT - 70, 140, 40, 8);
     ctx.fill(); ctx.stroke();

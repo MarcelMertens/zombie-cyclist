@@ -2,9 +2,7 @@ import type { ITrainer, TrainerData } from './ITrainer';
 import { DataSmoother } from './DataSmoother';
 
 declare global {
-  interface Navigator {
-    bluetooth: Bluetooth;
-  }
+  interface Navigator { bluetooth: Bluetooth; }
   interface Bluetooth {
     requestDevice(options: RequestDeviceOptions): Promise<BluetoothDevice>;
   }
@@ -32,37 +30,110 @@ declare global {
   }
 }
 
+export type BTStatus =
+  | 'connected'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'reconnected'
+  | 'reconnect_failed';
+
+/**
+ * BLE service UUIDs for all power/fitness services we read from.
+ * Listed as optionalServices so they can be accessed regardless of which
+ * filter matched the device.
+ */
+const OPTIONAL_SERVICES = ['fitness_machine', 'cycling_power'] as const;
+
+/**
+ * Filter list. Service-based entries catch any trainer that advertises the
+ * UUID in its BLE advertisement (most modern firmware 2018+). Name prefixes
+ * are a fallback for devices that only advertise by name.
+ */
+const TRAINER_FILTERS: NonNullable<RequestDeviceOptions['filters']> = [
+  // ── Service-based (catches the majority of modern trainers) ────────────────
+  { services: ['fitness_machine'] },  // FTMS — Wahoo, Tacx, Elite, Saris, …
+  { services: ['cycling_power'] },    // Cycling Power — all power meter/trainer combos
+
+  // ── Name prefix fallback (older firmware / non-advertising devices) ────────
+  // Wahoo
+  ...['KICKR', 'Wahoo'].map(p => ({ namePrefix: p })),
+  // Tacx / Garmin
+  ...['Tacx', 'TACX', 'NEO', 'FLUX', 'Vortex', 'Bushido', 'Genius'].map(p => ({ namePrefix: p })),
+  // Elite
+  ...['Direto', 'Suito', 'Drivo', 'Kura', 'Justo', 'Rampa', 'ELITE'].map(p => ({ namePrefix: p })),
+  // Saris / CycleOps
+  ...['Saris', 'Hammer', 'H3 '].map(p => ({ namePrefix: p })),
+  // Stages
+  ...['Stages', 'SB20'].map(p => ({ namePrefix: p })),
+  // Kinetic
+  ...['inRide', 'Kinetic'].map(p => ({ namePrefix: p })),
+  // BKOOL
+  ...['BKOOL'].map(p => ({ namePrefix: p })),
+  // Wattbike
+  ...['Wattbike'].map(p => ({ namePrefix: p })),
+  // Magene
+  ...['Magene', 'T100', 'T300'].map(p => ({ namePrefix: p })),
+  // Favero (power meter pedals with BLE)
+  ...['Favero', 'assioma'].map(p => ({ namePrefix: p })),
+];
+
+const MAX_RECONNECT_ATTEMPTS = 8;
+
 export class BluetoothTrainer implements ITrainer {
+  /** Which BLE characteristic is delivering power — shown in the HUD. */
+  source: 'ftms' | 'cycling_power' | 'none' = 'none';
+  /** How many reconnect attempts have been made since last disconnect. */
+  reconnectAttempts = 0;
+
   private device: BluetoothDevice | null = null;
   private smoother = new DataSmoother(5);
   private latestData: TrainerData = { watt: 0, speed: 0, cadence: 0 };
-  private onDisconnectCb?: () => void;
+  private onStatusCb?: (status: BTStatus) => void;
+  private shouldReconnect = false;
 
-  /** Which characteristic is delivering power data — shown in the connecting UI. */
-  source: 'ftms' | 'cycling_power' | 'none' = 'none';
-
-  async connect(onDisconnect?: () => void): Promise<void> {
-    this.onDisconnectCb = onDisconnect;
+  async connect(onStatus?: (status: BTStatus) => void): Promise<void> {
+    this.onStatusCb = onStatus;
+    this.shouldReconnect = true;
 
     this.device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { services: ['fitness_machine'] },
-        { services: ['cycling_power'] },
-        { namePrefix: 'KICKR' },
-        { namePrefix: 'Wahoo' },
-      ],
-      optionalServices: ['fitness_machine', 'cycling_power'],
+      filters: TRAINER_FILTERS,
+      optionalServices: [...OPTIONAL_SERVICES],
     });
 
     this.device.addEventListener('gattserverdisconnected', () => {
-      this.onDisconnectCb?.();
+      if (!this.shouldReconnect) return;
+      this.onStatusCb?.('disconnected');
+      this.scheduleReconnect(1);
     });
 
     const server = await this.device.gatt!.connect();
+    await this.subscribeToServer(server);
+    console.info('[BT] Connected to', this.device.gatt ? 'trainer' : 'device');
+  }
 
-    // Try FTMS Indoor Bike Data first, then fall back to Cycling Power Measurement.
-    let connected = false;
+  /**
+   * Subscribes to the best available power characteristic on this server.
+   * Called both on initial connect and on every reconnect.
+   *
+   * Priority: FTMS Indoor Bike Data (0x2ACD) → Cycling Power Measurement (0x2A63)
+   */
+  private async subscribeToServer(server: BluetoothRemoteGATTServer): Promise<void> {
+    // 1. FTMS Indoor Bike Data
+    const ftmsOk = await this.trySubscribeFtms(server);
+    if (ftmsOk) return;
 
+    // 2. Cycling Power Measurement
+    const cpOk = await this.trySubscribeCyclingPower(server);
+    if (cpOk) return;
+
+    throw new Error(
+      'Kein unterstützter Leistungs-Characteristic gefunden.\n' +
+      'Versucht: FTMS Indoor Bike Data (0x2ACD) und Cycling Power (0x2A63).\n' +
+      'Bitte prüfe die Trainer-Firmware.'
+    );
+  }
+
+  private async trySubscribeFtms(server: BluetoothRemoteGATTServer): Promise<boolean> {
     try {
       const svc = await server.getPrimaryService('fitness_machine');
       const char = await svc.getCharacteristic(0x2acd);
@@ -72,48 +143,70 @@ export class BluetoothTrainer implements ITrainer {
         if (c.value) this.latestData = this.parseFtms(c.value);
       });
       this.source = 'ftms';
-      connected = true;
-      console.log('[BT] Using FTMS Indoor Bike Data (0x2ACD)');
-    } catch (err) {
-      console.warn('[BT] FTMS not available or 0x2ACD missing:', err);
+      console.info('[BT] Using FTMS Indoor Bike Data (0x2ACD)');
+      return true;
+    } catch {
+      return false;
     }
+  }
 
-    if (!connected) {
+  private async trySubscribeCyclingPower(server: BluetoothRemoteGATTServer): Promise<boolean> {
+    try {
+      const svc = await server.getPrimaryService('cycling_power');
+      const char = await svc.getCharacteristic(0x2a63);
+      await char.startNotifications();
+      char.addEventListener('characteristicvaluechanged', (e: Event) => {
+        const c = e.target as unknown as BluetoothRemoteGATTCharacteristic;
+        if (c.value) this.latestData = this.parseCyclingPower(c.value);
+      });
+      this.source = 'cycling_power';
+      console.info('[BT] Using Cycling Power Measurement (0x2A63)');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private scheduleReconnect(attempt: number): void {
+    if (!this.shouldReconnect || !this.device) return;
+    this.reconnectAttempts = attempt;
+    this.onStatusCb?.('reconnecting');
+
+    // Exponential backoff: 1s, 2s, 3s, … capped at 5s
+    const delay = Math.min(1000 * attempt, 5000);
+
+    setTimeout(async () => {
+      if (!this.shouldReconnect || !this.device) return;
       try {
-        const svc = await server.getPrimaryService('cycling_power');
-        const char = await svc.getCharacteristic(0x2a63);
-        await char.startNotifications();
-        char.addEventListener('characteristicvaluechanged', (e: Event) => {
-          const c = e.target as unknown as BluetoothRemoteGATTCharacteristic;
-          if (c.value) this.latestData = this.parseCyclingPower(c.value);
-        });
-        this.source = 'cycling_power';
-        connected = true;
-        console.log('[BT] Using Cycling Power Measurement (0x2A63)');
+        const server = await this.device.gatt!.connect();
+        await this.subscribeToServer(server);
+        this.reconnectAttempts = 0;
+        this.onStatusCb?.('reconnected');
+        console.info('[BT] Reconnected successfully');
       } catch (err) {
-        console.warn('[BT] Cycling Power not available:', err);
+        console.warn(`[BT] Reconnect attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS}:`, err);
+        if (attempt < MAX_RECONNECT_ATTEMPTS && this.shouldReconnect) {
+          this.scheduleReconnect(attempt + 1);
+        } else {
+          console.error('[BT] Reconnect failed after', attempt, 'attempts');
+          this.onStatusCb?.('reconnect_failed');
+        }
       }
-    }
-
-    if (!connected) {
-      throw new Error('No supported power characteristic found on this device (tried FTMS 0x2ACD and Cycling Power 0x2A63).');
-    }
+    }, delay);
   }
 
   /**
    * FTMS Indoor Bike Data (0x2ACD) parser.
-   * Correctly advances offset for ALL optional fields between speed and power
-   * so the power value is read from the right bytes.
    *
-   * Field order per Bluetooth FTMS spec:
+   * Field layout (Bluetooth FTMS spec, all little-endian):
    *   [0-1]  Flags (uint16)
-   *   [+2]   Instantaneous Speed  (if bit 0 = 0) – uint16 * 0.01 km/h
-   *   [+2]   Average Speed        (if bit 1)      – uint16 * 0.01 km/h
-   *   [+2]   Instantaneous Cadence(if bit 2)      – uint16 * 0.5  rpm
-   *   [+2]   Average Cadence      (if bit 3)      – uint16 * 0.5  rpm
-   *   [+3]   Total Distance       (if bit 4)      – uint24 m
-   *   [+2]   Resistance Level     (if bit 5)      – int16
-   *   [+2]   Instantaneous Power  (if bit 6)      – int16 W   ← we want this
+   *   [+2]   Instantaneous Speed  (present if bit 0 = 0) — uint16 × 0.01 km/h
+   *   [+2]   Average Speed        (present if bit 1)     — uint16 × 0.01 km/h
+   *   [+2]   Instantaneous Cadence(present if bit 2)     — uint16 × 0.5 rpm
+   *   [+2]   Average Cadence      (present if bit 3)     — uint16 × 0.5 rpm
+   *   [+3]   Total Distance       (present if bit 4)     — uint24 m  (3 bytes!)
+   *   [+2]   Resistance Level     (present if bit 5)     — int16
+   *   [+2]   Instantaneous Power  (present if bit 6)     — int16 W   ← we want this
    */
   private parseFtms(value: DataView): TrainerData {
     if (value.byteLength < 2) return this.latestData;
@@ -121,59 +214,50 @@ export class BluetoothTrainer implements ITrainer {
     let offset = 2;
 
     let speed = 0;
-    if (!(flags & 0x01)) {           // bit 0 = 0 → Instantaneous Speed present
-      if (offset + 2 <= value.byteLength) {
-        speed = value.getUint16(offset, true) * 0.01;
-      }
+    if (!(flags & 0x01)) {
+      if (offset + 2 <= value.byteLength) speed = value.getUint16(offset, true) * 0.01;
       offset += 2;
     }
-
-    if (flags & 0x02) offset += 2;   // Average Speed (skip)
+    if (flags & 0x02) offset += 2;   // Average Speed
 
     let cadence = 0;
-    if (flags & 0x04) {              // Instantaneous Cadence
-      if (offset + 2 <= value.byteLength) {
-        cadence = value.getUint16(offset, true) * 0.5;
-      }
+    if (flags & 0x04) {
+      if (offset + 2 <= value.byteLength) cadence = value.getUint16(offset, true) * 0.5;
       offset += 2;
     }
-
-    if (flags & 0x08) offset += 2;   // Average Cadence (skip)
-    if (flags & 0x10) offset += 3;   // Total Distance – 3 bytes! (skip)
-    if (flags & 0x20) offset += 2;   // Resistance Level (skip)
+    if (flags & 0x08) offset += 2;   // Average Cadence
+    if (flags & 0x10) offset += 3;   // Total Distance (3 bytes)
+    if (flags & 0x20) offset += 2;   // Resistance Level
 
     let power = 0;
-    if (flags & 0x40) {              // Instantaneous Power
-      if (offset + 2 <= value.byteLength) {
-        power = value.getInt16(offset, true);
-      }
+    if (flags & 0x40) {
+      if (offset + 2 <= value.byteLength) power = value.getInt16(offset, true);
     }
 
-    console.log(`[BT/FTMS] flags=0x${flags.toString(16).padStart(4,'0')} speed=${speed.toFixed(1)} cadence=${cadence} power=${power}W`);
-
-    const smoothedWatt = this.smoother.push(power);
-    return { watt: smoothedWatt, speed, cadence };
+    return { watt: this.smoother.push(Math.max(0, power)), speed, cadence };
   }
 
   /**
    * Cycling Power Measurement (0x2A63) parser.
-   * Instantaneous Power is always at bytes [2-3] regardless of flags.
+   * Instantaneous Power is always at bytes [2-3] (signed int16, little-endian),
+   * regardless of which optional fields the flags enable.
    */
   private parseCyclingPower(value: DataView): TrainerData {
     if (value.byteLength < 4) return this.latestData;
     const power = value.getInt16(2, true);
-    console.log(`[BT/CyclingPower] power=${power}W`);
-    const smoothedWatt = this.smoother.push(power);
-    return { watt: smoothedWatt, speed: this.latestData.speed, cadence: this.latestData.cadence };
+    return {
+      watt: this.smoother.push(Math.max(0, power)),
+      speed: this.latestData.speed,
+      cadence: this.latestData.cadence,
+    };
   }
 
   update(_dt: number): void {}
 
-  getCurrentData(): TrainerData {
-    return this.latestData;
-  }
+  getCurrentData(): TrainerData { return this.latestData; }
 
   dispose(): void {
+    this.shouldReconnect = false;
     this.device?.gatt?.disconnect();
   }
 }
