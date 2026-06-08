@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "start": "vite preview"
   },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "devDependencies": {
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
