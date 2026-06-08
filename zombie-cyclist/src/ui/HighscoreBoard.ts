@@ -75,16 +75,17 @@ export class HighscoreBoardUI {
     // Table header
     const rowY0 = 165;
     const rowH = 36;
+    const COL = { rank: 40, name: 80, time: 300, avg: 410, max: 510, diff: 620, date: 830 };
     ctx.fillStyle = '#555';
     ctx.font = '13px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('#', 40, rowY0);
-    ctx.fillText('Name', 80, rowY0);
-    ctx.fillText('Time', 200, rowY0);
-    ctx.fillText('Avg W', 310, rowY0);
-    ctx.fillText('Max W', 420, rowY0);
-    ctx.fillText('Difficulty', 530, rowY0);
-    ctx.fillText('Date', 720, rowY0);
+    ctx.fillText('#', COL.rank, rowY0);
+    ctx.fillText('Name', COL.name, rowY0);
+    ctx.fillText('Time', COL.time, rowY0);
+    ctx.fillText('Avg W', COL.avg, rowY0);
+    ctx.fillText('Max W', COL.max, rowY0);
+    ctx.fillText('Difficulty', COL.diff, rowY0);
+    ctx.fillText('Date', COL.date, rowY0);
 
     // Entries
     const entries = this.tab === 'all'
@@ -104,16 +105,16 @@ export class HighscoreBoardUI {
       ctx.fillStyle = isNew ? '#ffd600' : '#ddd';
       ctx.font = isNew ? 'bold 15px monospace' : '15px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(`${e.rank}`, 40, ry);
-      ctx.fillText(e.name, 80, ry);
+      ctx.fillText(`${e.rank}`, COL.rank, ry);
+      ctx.fillText(e.name, COL.name, ry);
       const mins = Math.floor(e.survivalSeconds / 60);
       const secs = Math.floor(e.survivalSeconds % 60);
-      ctx.fillText(`${mins}:${String(secs).padStart(2,'0')}`, 200, ry);
-      ctx.fillText(`${Math.round(e.avgWatt)} W`, 310, ry);
-      ctx.fillText(`${Math.round(e.maxWatt)} W`, 420, ry);
-      ctx.fillText(`${PRESETS[e.difficulty].emoji} ${PRESETS[e.difficulty].label}`, 530, ry);
+      ctx.fillText(`${mins}:${String(secs).padStart(2,'0')}`, COL.time, ry);
+      ctx.fillText(`${Math.round(e.avgWatt)} W`, COL.avg, ry);
+      ctx.fillText(`${Math.round(e.maxWatt)} W`, COL.max, ry);
+      ctx.fillText(`${PRESETS[e.difficulty].emoji} ${PRESETS[e.difficulty].label}`, COL.diff, ry);
       const d = new Date(e.timestamp);
-      ctx.fillText(d.toLocaleDateString(), 720, ry);
+      ctx.fillText(d.toLocaleDateString(), COL.date, ry);
     }
 
     if (entries.length === 0) {

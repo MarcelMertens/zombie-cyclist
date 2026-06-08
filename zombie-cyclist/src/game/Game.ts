@@ -71,6 +71,12 @@ export class Game {
     requestAnimationFrame(this.loop.bind(this));
   }
 
+  isNameInputActive(): boolean {
+    return this.state === GameState.GAMEOVER
+      && this.deathAnimMs === 0
+      && !this.gameOverScreen.isSubmitted();
+  }
+
   private loop(timestamp: number): void {
     const dt = Math.min(timestamp - this.lastTime, 100);
     this.lastTime = timestamp;

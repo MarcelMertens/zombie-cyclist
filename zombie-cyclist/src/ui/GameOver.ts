@@ -1,17 +1,15 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '../game/config';
 import type { DifficultyConfig } from '../game/DifficultyPreset';
 
-const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const MAX_NAME_LENGTH = 16;
 
 export class GameOverScreen {
-  private nameChars = ['A', 'A', 'A'];
-  private cursor = 0;
+  private name = '';
   private submitted = false;
   private rank: number | null = null;
 
   reset(): void {
-    this.nameChars = ['A', 'A', 'A'];
-    this.cursor = 0;
+    this.name = '';
     this.submitted = false;
     this.rank = null;
   }
@@ -21,36 +19,30 @@ export class GameOverScreen {
   }
 
   isSubmitted(): boolean { return this.submitted; }
-  getName(): string { return this.nameChars.join(''); }
+  isEnteringName(): boolean { return !this.submitted; }
+  getName(): string { return this.name.trim() || 'ANONYM'; }
 
   handleKey(key: string): 'retry' | 'menu' | 'submit' | null {
     if (this.submitted) {
-      if (key === 'Enter' || key === 'r') return 'retry';
-      if (key === 'm') return 'menu';
+      if (key === 'Enter' || key === 'r' || key === 'R') return 'retry';
+      if (key === 'm' || key === 'M') return 'menu';
       return null;
     }
-    if (key === 'ArrowLeft') { this.cursor = Math.max(0, this.cursor - 1); return null; }
-    if (key === 'ArrowRight') { this.cursor = Math.min(2, this.cursor + 1); return null; }
-    if (key === 'ArrowUp') {
-      const i = CHARS.indexOf(this.nameChars[this.cursor]);
-      this.nameChars[this.cursor] = CHARS[(i + 1) % CHARS.length];
-      return null;
-    }
-    if (key === 'ArrowDown') {
-      const i = CHARS.indexOf(this.nameChars[this.cursor]);
-      this.nameChars[this.cursor] = CHARS[(i - 1 + CHARS.length) % CHARS.length];
-      return null;
-    }
+
     if (key === 'Enter') {
       this.submitted = true;
       return 'submit';
     }
-    // Letter shortcut
-    const upper = key.toUpperCase();
-    if (CHARS.includes(upper)) {
-      this.nameChars[this.cursor] = upper;
-      this.cursor = Math.min(2, this.cursor + 1);
+
+    if (key === 'Backspace') {
+      this.name = this.name.slice(0, -1);
+      return null;
     }
+
+    if (key.length === 1 && this.name.length < MAX_NAME_LENGTH) {
+      this.name += key;
+    }
+
     return null;
   }
 
@@ -65,7 +57,6 @@ export class GameOverScreen {
     const cx = CANVAS_WIDTH / 2;
     ctx.save();
 
-    // Overlay
     ctx.fillStyle = 'rgba(0,0,0,0.85)';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -77,12 +68,11 @@ export class GameOverScreen {
     ctx.fillText('GAME OVER', cx, 160);
     ctx.shadowBlur = 0;
 
-    // Stats
     const mins = Math.floor(survivalSeconds / 60);
     const secs = Math.floor(survivalSeconds % 60);
     ctx.fillStyle = '#fff';
     ctx.font = '22px monospace';
-    ctx.fillText(`Survived: ${mins}:${String(secs).padStart(2,'0')}`, cx, 230);
+    ctx.fillText(`Survived: ${mins}:${String(secs).padStart(2, '0')}`, cx, 230);
     ctx.fillText(`Avg Power: ${Math.round(avgWatt)} W   Max: ${Math.round(maxWatt)} W`, cx, 265);
     ctx.fillText(`Difficulty: ${difficulty.emoji} ${difficulty.label}`, cx, 300);
 
@@ -100,39 +90,61 @@ export class GameOverScreen {
     if (!this.submitted) {
       ctx.fillStyle = '#ffd600';
       ctx.font = 'bold 24px monospace';
-      ctx.fillText('Enter your name:', cx, 360);
+      ctx.fillText('Gib deinen Namen ein:', cx, 360);
 
-      // Name entry
-      const charW = 60, charH = 70, charGap = 16;
-      const totalW = 3 * charW + 2 * charGap;
-      const nx = cx - totalW / 2;
-      for (let i = 0; i < 3; i++) {
-        const bx = nx + i * (charW + charGap);
-        ctx.fillStyle = this.cursor === i ? '#ffd600' : 'rgba(255,214,0,0.2)';
-        ctx.strokeStyle = '#ffd600';
-        ctx.lineWidth = this.cursor === i ? 3 : 1;
-        ctx.beginPath();
-        ctx.roundRect(bx, 380, charW, charH, 6);
-        ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 36px monospace';
-        ctx.fillText(this.nameChars[i], bx + charW / 2, 380 + charH / 2 + 2);
+      const fieldW = 440;
+      const fieldH = 56;
+      const fx = cx - fieldW / 2;
+      const fy = 378;
+
+      ctx.fillStyle = 'rgba(255,214,0,0.08)';
+      ctx.strokeStyle = '#ffd600';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(fx, fy, fieldW, fieldH, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      const cursorOn = Math.floor(Date.now() / 530) % 2 === 0;
+      ctx.font = 'bold 26px monospace';
+      ctx.textAlign = 'left';
+
+      if (this.name.length === 0) {
+        ctx.fillStyle = 'rgba(255,214,0,0.28)';
+        ctx.fillText('Dein Name...', fx + 14, fy + fieldH / 2 + 9);
+        if (cursorOn) {
+          ctx.fillStyle = 'rgba(255,214,0,0.6)';
+          ctx.fillRect(fx + 14, fy + 10, 2, fieldH - 20);
+        }
+      } else {
+        ctx.fillStyle = '#fff';
+        ctx.fillText(this.name, fx + 14, fy + fieldH / 2 + 9);
+        if (cursorOn) {
+          const tw = ctx.measureText(this.name).width;
+          ctx.fillStyle = '#ffd600';
+          ctx.fillRect(fx + 16 + tw, fy + 10, 2, fieldH - 20);
+        }
       }
 
-      ctx.fillStyle = '#aaa';
-      ctx.font = '14px monospace';
-      ctx.fillText('↑↓ change   ←→ move   Enter to confirm', cx, 470);
+      ctx.fillStyle = this.name.length >= MAX_NAME_LENGTH ? '#ff5252' : '#555';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${this.name.length}/${MAX_NAME_LENGTH}`, fx + fieldW - 8, fy + fieldH - 5);
+
+      ctx.fillStyle = '#777';
+      ctx.font = '13px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Tippe deinen Namen  ·  Backspace zum Löschen  ·  Enter bestätigt', cx, fy + fieldH + 22);
     } else {
       ctx.fillStyle = '#69f0ae';
       ctx.font = 'bold 28px monospace';
       ctx.fillText(
-        this.rank ? `🏆 You ranked #${this.rank}!` : 'Score saved!',
-        cx, 380
+        this.rank ? `🏆 Platz #${this.rank}!` : 'Score gespeichert!',
+        cx, 390,
       );
-
       ctx.fillStyle = '#aaa';
       ctx.font = '18px monospace';
-      ctx.fillText('[Enter / R] Play again   [M] Main menu', cx, 440);
+      ctx.fillText('[Enter / R] Nochmal   [M] Hauptmenü', cx, 440);
     }
 
     ctx.restore();
