@@ -1,7 +1,23 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT, GROUND_Y } from '../game/config';
 
+const CHURCH_W = 338;
+const CHURCH_H = 406;
+const CHURCH_CYCLE_MS = 60_000; // one traversal per minute
+
+let churchImg: HTMLImageElement | null = null;
+let churchImgRequested = false;
+
+function loadChurchImg(): void {
+  if (churchImgRequested) return;
+  churchImgRequested = true;
+  const img = new Image();
+  img.onload = () => { churchImg = img; };
+  img.src = '/kirche.png';
+}
+
 export class BackgroundScroller {
   private o = [0, 0, 0]; // layer offsets
+  private churchMs = 0;  // ms elapsed within the current 60-s cycle
 
   // Deterministic scene elements
   private readonly clouds = makeCloud();
@@ -9,10 +25,15 @@ export class BackgroundScroller {
   private readonly trees = makeTrees();
   private readonly lampX = makeLamps();
 
-  update(worldSpeed: number, _dt: number): void {
+  constructor() {
+    loadChurchImg();
+  }
+
+  update(worldSpeed: number, dt: number): void {
     this.o[0] = (this.o[0] + worldSpeed * 0.12) % 2000;
     this.o[1] = (this.o[1] + worldSpeed * 0.40) % 2400;
     this.o[2] = (this.o[2] + worldSpeed * 1.00) % 320;
+    this.churchMs = (this.churchMs + dt) % CHURCH_CYCLE_MS;
   }
 
   draw(ctx: CanvasRenderingContext2D, gameFraction: number): void {
@@ -20,6 +41,7 @@ export class BackgroundScroller {
     this.drawSun(ctx, gameFraction);
     this.drawClouds(ctx);
     this.drawMountains(ctx);
+    this.drawChurch(ctx);
     this.drawLake(ctx);
     this.drawForest(ctx);
     this.drawGrass(ctx);
@@ -87,6 +109,20 @@ export class BackgroundScroller {
       ctx.closePath();
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  private drawChurch(ctx: CanvasRenderingContext2D): void {
+    if (!churchImg) return;
+    // Drifts from right to left over 60 seconds; invisible outside screen edges
+    const progress = this.churchMs / CHURCH_CYCLE_MS;
+    const x = Math.round(CANVAS_WIDTH - progress * (CANVAS_WIDTH + CHURCH_W));
+    if (x > CANVAS_WIDTH || x + CHURCH_W < 0) return;
+    const y = GROUND_Y - 62 - CHURCH_H + 60; // base rests on the grass strip
+    ctx.save();
+    ctx.globalAlpha = 0.88;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(churchImg, x, y, CHURCH_W, CHURCH_H);
     ctx.restore();
   }
 
